@@ -6,6 +6,13 @@
 
 Python binding for J.DepP(C++ implementation of Japanese Dependency Parsers) https://www.tkl.iis.u-tokyo.ac.jp/~ynaga/jdepp/
 
+## Rust bindings (experimental)
+
+このリポジトリには Rust から J.DepP を呼ぶための crate `jdepp-rs` も同梱しています。
+
+- 詳細: `crates/jdepp-rs/README.md`
+- 実行例: `cargo run -p jdepp-rs --example parse_from_postagged -- /path/to/model/knbc`
+
 ## Install
 
 ```

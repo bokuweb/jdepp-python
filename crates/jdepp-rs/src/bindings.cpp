@@ -84,6 +84,14 @@ public:
     {
         load_model(_model_path);
     }
+    ~Jdepp()
+    {
+        if (_parser)
+        {
+            delete _parser;
+            _parser = nullptr;
+        }
+    }
 
     void set_threads(uint32_t nthreads)
     {
@@ -312,13 +320,18 @@ extern "C"
         return instance->model_loaded();
     }
 
-    Sentence *parse_from_postagged(const Jdepp *instance, const char *input_postagged, size_t len)
+    Sentence *jdepp_parse_from_postagged(const Jdepp *instance, const char *input_postagged, size_t len)
     {
         return instance->parse_from_postagged(input_postagged, len);
     }
 
-    const std::string *sentence_str(const Sentence *instance)
+    void sentence_destroy(Sentence *instance)
     {
-        return &instance->str();
+        delete instance;
+    }
+
+    const char *sentence_str(const Sentence *instance)
+    {
+        return instance->str().c_str();
     }
 }
