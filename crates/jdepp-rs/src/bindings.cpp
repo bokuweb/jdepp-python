@@ -317,8 +317,8 @@ extern "C"
         return instance->parse_from_postagged(input_postagged, len);
     }
 
-    const std::string *sentence_str(const Sentence *instance)
+    const const char *sentence_str(const Sentence *instance)
     {
-        return &instance->str();
+        return instance->str().c_str();
     }
 }
