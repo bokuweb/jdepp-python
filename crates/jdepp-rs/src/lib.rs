@@ -58,6 +58,50 @@ impl From<NulError> for Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Token {
+    pub surface: String,
+    pub feature: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chunk {
+    pub id: usize,
+    /// 係り先 chunk id。root の場合は `-1`
+    pub head: isize,
+    /// 係り種別（例: 'D'）。不明な場合は `None`
+    pub dep_type: Option<char>,
+    pub tokens: Vec<Token>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedSentence {
+    pub chunks: Vec<Chunk>,
+}
+
+#[derive(Debug)]
+pub enum ParseError {
+    Jdepp(Error),
+    NoChunks,
+    UnexpectedTokenLine { line: String },
+    InvalidChunkHeader { line: String },
+    InvalidHead { line: String },
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParseError::Jdepp(e) => write!(f, "jdepp error: {e}"),
+            ParseError::NoChunks => write!(f, "no chunks found"),
+            ParseError::UnexpectedTokenLine { line } => write!(f, "token line before any chunk: {line}"),
+            ParseError::InvalidChunkHeader { line } => write!(f, "invalid chunk header: {line}"),
+            ParseError::InvalidHead { line } => write!(f, "invalid head in chunk header: {line}"),
+        }
+    }
+}
+
+impl std::error::Error for ParseError {}
+
 pub struct Jdepp {
     raw: NonNull<JdeppOpaque>,
 }
@@ -97,12 +141,117 @@ impl Jdepp {
         unsafe { sentence_destroy(sent.as_ptr()) };
         Ok(out)
     }
+
+    /// `parse_from_postagged` の出力（CaboCha 互換: `* <id> <head>D` + 形態素行 + `EOS`）を
+    /// Rust の構造体に parse して返します。
+    pub fn parse_from_postagged_parsed(&self, input_postagged: &str) -> result::Result<ParsedSentence, ParseError> {
+        let out = self.parse_from_postagged(input_postagged).map_err(ParseError::Jdepp)?;
+        parse_cabocha_like(&out)
+    }
 }
 
 impl Drop for Jdepp {
     fn drop(&mut self) {
         unsafe { jdepp_destroy(self.raw.as_ptr()) };
     }
+}
+
+/// J.DepP の CaboCha 互換出力を parse します。
+///
+/// 例:
+/// - `* 1 4D` : chunk 1 は chunk 4 に係る（D=dependency）
+/// - `* 4 -1D`: chunk 4 は root（係り先なし）
+pub fn parse_cabocha_like(output: &str) -> result::Result<ParsedSentence, ParseError> {
+    let mut chunks: Vec<Chunk> = Vec::new();
+    let mut current: Option<Chunk> = None;
+
+    for raw_line in output.lines() {
+        let line = raw_line.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with("#") {
+            continue;
+        }
+        if line == "EOS" {
+            break;
+        }
+
+        if let Some(rest) = line.strip_prefix("*") {
+            if let Some(c) = current.take() {
+                chunks.push(c);
+            }
+            let fields: Vec<&str> = rest.split_whitespace().collect();
+            if fields.len() < 2 {
+                return Err(ParseError::InvalidChunkHeader {
+                    line: line.to_string(),
+                });
+            }
+
+            // 互換性重視: 末尾フィールドを "auto" として扱う（to_tree.py 互換）
+            // "* 1 4D" -> auto="4D"
+            // "* 1 4D@0.98" -> auto="4D@0.98"
+            let id = fields[0]
+                .parse::<usize>()
+                .map_err(|_| ParseError::InvalidChunkHeader {
+                    line: line.to_string(),
+                })?;
+            let mut auto = *fields.last().unwrap();
+
+            // auto の "@prob" は無視（必要なら後で拡張）
+            if let Some((left, _prob)) = auto.split_once('@') {
+                auto = left;
+            }
+
+            if auto.len() < 2 {
+                return Err(ParseError::InvalidHead {
+                    line: line.to_string(),
+                });
+            }
+            let dep_type = auto.chars().last();
+            let head_str = &auto[..auto.len() - dep_type.map(|c| c.len_utf8()).unwrap_or(0)];
+            let head = head_str
+                .parse::<isize>()
+                .map_err(|_| ParseError::InvalidHead {
+                    line: line.to_string(),
+                })?;
+
+            current = Some(Chunk {
+                id,
+                head,
+                dep_type,
+                tokens: Vec::new(),
+            });
+            continue;
+        }
+
+        // token line
+        let Some(ref mut c) = current else {
+            return Err(ParseError::UnexpectedTokenLine {
+                line: line.to_string(),
+            });
+        };
+
+        let (surface, feature) = match line.find(|ch: char| ch == '\t' || ch.is_whitespace()) {
+            Some(pos) => {
+                let s = line[..pos].to_string();
+                let f = line[pos..].trim().to_string();
+                (s, f)
+            }
+            None => (line.to_string(), String::new()),
+        };
+        c.tokens.push(Token { surface, feature });
+    }
+
+    if let Some(c) = current.take() {
+        chunks.push(c);
+    }
+
+    if chunks.is_empty() {
+        return Err(ParseError::NoChunks);
+    }
+
+    Ok(ParsedSentence { chunks })
 }
 
 
