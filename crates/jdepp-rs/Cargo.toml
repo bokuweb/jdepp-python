@@ -1,0 +1,16 @@
+[package]
+name = "jdepp-rs"
+version = "0.1.0"
+edition = "2021"
+readme = "README.md"
+description = "Rust bindings for J.DepP (Japanese dependency parser) bundled in jdepp-python repo"
+license = "BSD-2-Clause"
+repository = "https://github.com/lighttransport/jdepp-python"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+libc = "0.2"
+
+[build-dependencies]
+cc = "1.0"
